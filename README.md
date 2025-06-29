@@ -6,7 +6,7 @@ DiT-Dep: A Diffusion Transformer-based Framework for Depression Detection and Ne
 | :-:  | :-: | :-: | :-: |
 |ds002748|51|21|10.18112/openneuro.ds002748.v1.0.5|
 |ds003007|29|0|10.18112/openneuro.ds003007.v1.0.1|
-|SRPBS_OPEN||||
+|SRPBS_OPEN|255|791|10.1038/s41597-021-01004-8|
 |ds004627|||10.18112/openneuro.ds004627.v1.1.0|
 |Cambridge_Buckner|0|198|https://fcon_1000.projects.nitrc.org/fcpClassic/FcpTable.html|
 
