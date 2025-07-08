@@ -14,12 +14,6 @@ class Raw_Data_Dir_Path:
     ds004627_dir_path = dataset_dir_path / "ds004627"
     # health controls
     cambridge_dir_path = dataset_dir_path / "Cambridge_Buckner"
-    # check 
-    assert SRPBS_dir_path.exists(), f"{SRPBS_dir_path} does not exist"
-    assert ds002748_dir_path.exists(), f"{ds002748_dir_path} does not exist"
-    assert ds003007_dir_path.exists(), f"{ds003007_dir_path} does not exist"
-    assert ds004627_dir_path.exists(), f"{ds004627_dir_path} does not exist"
-    assert cambridge_dir_path.exists(), f"{cambridge_dir_path} does not exist"
     
 """ Brain Atlas Paths """
 @dataclass(frozen=True)

@@ -1,9 +1,16 @@
 import torch
 import torch.nn as nn
+from dataclasses import dataclass
 
-# from config import Experiment_Config
+from config import Experiment_Config
 
 device = torch.device(device="cuda" if torch.cuda.is_available() else "cpu")
+
+@dataclass(frozen=True)
+class Model_Returns:
+    logits : torch.Tensor
+    x_proj : torch.Tensor
+    x_pred : torch.Tensor
 
 class Time_Embedding(nn.Module):
     def __init__(self, dim : int, timesteps : int) -> None:
@@ -28,40 +35,113 @@ class Time_Embedding(nn.Module):
         t = self.mlp(t).unsqueeze(1) # (B, 1, dim)
         return t
 
-class Denoise_Network(nn.Module):
-    def __init__(self, dim : int) -> None:
+class Denoising_Network(nn.Module):
+    def __init__(self, dim : int, use_att : bool, nhead : int = 8) -> None:
         super().__init__()
-        self.QKV = nn.ModuleDict(modules={key : nn.Linear(in_features=dim, out_features=dim, bias=True) for key in ["Q", "K", "V"]})
-        
+        assert dim % nhead == 0, f"dim={dim} must be divisible by nhead={nhead}"
+        self.QKV = nn.ModuleDict(modules={
+            key : nn.Linear(in_features=dim, out_features=dim, bias=True) 
+            for key in ["Q", "K", "V"]
+        })
+        self.multihead_attention = nn.MultiheadAttention(embed_dim=dim, num_heads=nhead, batch_first=True)
+        self.use_att = use_att
+
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         # x.shape # (B, N, L)
+        Q = self.QKV["Q"](x)
+        K = self.QKV["K"](x)
+        V = self.QKV["V"](x)
+        x, attention_weights = self.multihead_attention(query=Q, key=K, value=V)
+        if self.use_att:
+            # entropy-based attention refining
+            entropy = -torch.sum(attention_weights * torch.log(attention_weights + 1e-7), dim=-1) # (B, N)
+            attention_scaling = torch.sigmoid(entropy.unsqueeze(-1) - 0.5) * 0.5 + 0.75
+            attention_weights = attention_weights * attention_scaling # (B, N, N)
+            attention_weights = torch.softmax(attention_weights, dim=-1) # (B, N, N)
+            assert x.dim() == 3 and attention_weights.dim() == 3, f"torch.bmm input must be 3D tensor, got {x.dim()}D and {attention_weights.dim()}D"
+            x = torch.bmm(attention_weights, x) # (B, N, L)
         return x
 
-class Classifier(nn.Module):
-    def __init__(self, ) -> None:
+class MLP(nn.Module):
+    def __init__(self, in_features : int, out_features : int) -> None:
         super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(in_features=in_features, out_features=out_features),
+            nn.Tanh()
+        )
     
-    def forward(self, ) -> torch.Tensor:
-        pass
+    def forward(self, x : torch.Tensor) -> torch.Tensor:  
+        return self.mlp(x)
+    
+class ResidualBlock(nn.Module):  
+    def __init__(self, dim : int) -> None:  
+        super().__init__()  
+        self.mlp = MLP(in_features=dim, out_features=dim)
+    
+    def forward(self, x : torch.Tensor) -> torch.Tensor:  
+        return x + self.mlp(x) 
+    
+class Classifier(nn.Module):
+    def __init__(self, dim : int, num_class : int) -> None:
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            MLP(in_features=dim, out_features=1024),
+            ResidualBlock(dim=1024),
+            MLP(in_features=1024, out_features=256),
+            ResidualBlock(dim=256),
+            MLP(in_features=256, out_features=64),
+            ResidualBlock(dim=64),
+            MLP(in_features=64, out_features=16),
+            ResidualBlock(dim=16),
+            MLP(in_features=16, out_features=num_class),
+        )
+
+    def forward(self, x_p : torch.Tensor) -> torch.Tensor:
+        logits = self.classifier(x_p)
+        return logits
 
 class DIT_DEP(nn.Module):
-    def __init__(self, shape_dict : dict[str, torch.Size], timesteps : int = 10000, schedule : str = "cosine") -> None:
+    def __init__(self, num_class : int, shape_dict : dict[str, torch.Size], latent_dim : int, use_dit : bool, use_att : bool,
+        timesteps : int = 100, schedule : str = "linear"
+    ) -> None:
         super().__init__()
+        self.use_dit = use_dit
         self.timesteps = timesteps
         # diffusion parameters
         betas = self.__make_beta_schedule__(schedule=schedule, timesteps=timesteps)
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
         # cumulative noise decay factor
-        self.register_buffer("sqrt_alphas_cumprod", torch.sqrt(alphas_cumprod))
+        self.register_buffer(name="sqrt_alphas_cumprod", tensor=torch.sqrt(alphas_cumprod))
         # cumulative noise growth factor
-        self.register_buffer("sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod))
+        self.register_buffer(name="sqrt_one_minus_alphas_cumprod", tensor=torch.sqrt(1.0 - alphas_cumprod))
 
-        # Time embedding
-        self.time_embedding = nn.ModuleDict(modules={
-            k : Time_Embedding(dim=v[-1], timesteps=timesteps) 
-            for k,v in shape_dict.items()
-        })
+        # Projector
+        self.projector = nn.ModuleDict()
+        if Experiment_Config.TS in shape_dict:
+            shape = shape_dict[Experiment_Config.TS]
+            self.projector[Experiment_Config.TS] = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(in_features=shape[0]*shape[1], out_features=4096),
+                nn.Tanh(),
+                nn.Linear(in_features=4096, out_features=latent_dim)
+            )
+        if Experiment_Config.FC in shape_dict:
+            shape = shape_dict[Experiment_Config.FC]
+            self.projector[Experiment_Config.FC] = nn.Sequential(
+                nn.Linear(in_features=shape[1]*(shape[1]-1)//2, out_features=latent_dim)
+            )
+
+        if self.use_dit:
+            # Time embedding
+            self.time_embedding = Time_Embedding(dim=latent_dim, timesteps=timesteps) 
+    
+            # Denoising networks
+            self.denoising_network = Denoising_Network(dim=latent_dim, use_att=use_att) 
+
+        # Classifier
+        self.classifier = Classifier(dim=len(shape_dict)*latent_dim, num_class=num_class)
 
     def __make_beta_schedule__(self, schedule: str, timesteps: int, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3) -> torch.Tensor:
         """Generates a beta schedule for diffusion models based on the specified type.
@@ -167,38 +247,74 @@ class DIT_DEP(nn.Module):
         reshaped = gathered.reshape(t.shape[0], *((1,) * (len(x_shape) - 1)))  
         return reshaped
 
-    def forward_chain(self, input_dict : dict[str, torch.Tensor], t : torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward_chain(self, x_0 : torch.Tensor, t : torch.Tensor) -> dict[str, torch.Tensor]:
         """ q_sample, perturb data with noise
         x_t = sqrt(α_t) * x_0 + sqrt(1 - α_t) * ε
         """
-        output_dict = {}
-        for key, x_0 in input_dict.items():
-            noise = torch.randn_like(input=x_0)
-            sqrt_alphas_cumprod_t = self.__extract_into_tensor__(a=self.sqrt_alphas_cumprod, t=t, x_shape=x_0.shape)
-            sqrt_one_minus_alphas_cumprod_t = self.__extract_into_tensor__(a=self.sqrt_one_minus_alphas_cumprod, t=t, x_shape=x_0.shape)
-            x_t = sqrt_alphas_cumprod_t * x_0 + sqrt_one_minus_alphas_cumprod_t * noise
-            output_dict[key] = x_t
-        return output_dict
+        noise = torch.randn_like(input=x_0)
+        sqrt_alphas_cumprod_t = self.__extract_into_tensor__(a=self.sqrt_alphas_cumprod, t=t, x_shape=x_0.shape)
+        sqrt_one_minus_alphas_cumprod_t = self.__extract_into_tensor__(a=self.sqrt_one_minus_alphas_cumprod, t=t, x_shape=x_0.shape)
+        x_t = sqrt_alphas_cumprod_t * x_0 + sqrt_one_minus_alphas_cumprod_t * noise
+        return x_t
 
-    def reverse_chain(self, input_dict : dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        output_dict = {}
-        for key, value in input_dict.items():
-            pass
-        return output_dict
+    def reverse_chain(self, x_t : torch.Tensor, t : torch.Tensor) -> dict[str, torch.Tensor]:
+        time_embedding = self.time_embedding(t=t)
+        x_p = self.denoising_network(x_t + time_embedding)
+        return x_p
 
+    def __get_triu__(self, x : torch.Tensor) -> torch.Tensor:
+        """ get the strict upper triangular part of the matrix """
+        assert x.dim() == 3 and x.shape[-2] == x.shape[-1], f"Invalid shape: {x.shape}"
+        _, matrix_size, _ = x.shape
+        mask = torch.triu(input=torch.ones(matrix_size, matrix_size, dtype=torch.bool, device=x.device), diagonal=1)
+        return x[:, mask]
+    
     def forward(self, input_dict : dict[str, torch.Tensor]) -> torch.Tensor:
         """
         time series             : (B, num_regions, num_slices)
         functional connectivity : (B, num_regions, num_regions)
         """
-        # t: time steps in the diffusion process
-        # randomly generate a time step t, i.e., directly sample the t-th step of T steps; there is no need to use 'for t in range(T)' to accumulate.
-        t = torch.randint(0, self.timesteps, (next(iter(input_dict.values())).shape[0],), dtype=torch.long, device=device) # (batch_size,)
-        
-        x_t_dict = self.forward_chain(input_dict=input_dict, t=t)
-        time_embedding_dict = self.time_embedding(t=t)
-        for key in x_t_dict:
-            x_t_dict[key] = x_t_dict[key] + time_embedding_dict[key]
-        
+        # projected to the same shape: (B, N, latent_dim)
+        projected_dict = {}
+        if Experiment_Config.TS in input_dict:
+            projected_dict[Experiment_Config.TS] = self.projector[Experiment_Config.TS](input_dict[Experiment_Config.TS])
+        for key, value in input_dict.items():
+            if key == Experiment_Config.FC:
+                value = self.__get_triu__(x=value)
+            projected_dict[key] = self.projector[key](value)
+        tensor = torch.stack(tensors=list(projected_dict.values()), dim=1)
 
-        return None
+        # diffusion with Transformer
+        if self.use_dit:
+            # t: time steps in the diffusion process
+            # randomly generate a time step t, i.e., directly sample the t-th step of T steps; there is no need to use 'for t in range(T)' to accumulate.
+            t = torch.randint(low=0, high=self.timesteps, size=(next(iter(input_dict.values())).shape[0],), dtype=torch.long, device=device) # (batch_size,)
+            # forward chain
+            x_t = self.forward_chain(x_0=tensor, t=t)
+            # reverse chain
+            x_p = self.reverse_chain(x_t=x_t, t=t)
+        else:
+            x_p = tensor
+
+        # classification
+        logits = self.classifier(x_p=x_p)
+
+        return Model_Returns(logits=logits, x_proj=tensor, x_pred=x_p)
+
+class Combined_Loss(nn.modules.loss._Loss):
+    def __init__(self, cet_weight : float, mse_weight : float, use_dit : bool) -> None:
+        super().__init__()
+        self.cet_weight = cet_weight
+        self.mse_weight = mse_weight
+        self.use_dit = use_dit
+        self.cet = nn.CrossEntropyLoss()
+        self.mse = nn.MSELoss()
+
+    def forward(self, input : torch.Tensor, target : torch.Tensor, x_0 : torch.Tensor, x_p : torch.Tensor) -> None:
+        cet_loss = self.cet(input=input, target=target)
+        if self.use_dit:
+            assert x_0 is not None and x_p is not None
+            mse_loss = self.mse(x_0.flatten(start_dim=1), x_p.flatten(start_dim=1))
+        else:
+            mse_loss = torch.tensor(data=0.0, device=input.device)
+        return self.cet_weight * cet_loss + self.mse_weight * mse_loss

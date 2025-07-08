@@ -11,11 +11,11 @@ from tqdm import tqdm
 from pathlib import Path
 from dataclasses import dataclass
 from collections import defaultdict
-from nilearn import maskers, connectome
 from sklearn.model_selection import KFold
+from nilearn import maskers, connectome, image
 
 from utils import write_json, read_json
-from config import seed, n_splits, Experiment_Config, Mild_Config, Major_Config
+from config import seed, n_splits, Group, Experiment_Config, Mild_Config
 from path import Raw_Data_Dir_Path, Running_File_Dir_Path, Brain_Atlas_Dir_Path
 
 random.seed(seed)
@@ -30,15 +30,12 @@ class Hand:
     X : int = 0
     R : int = 1
     L : int = 2
-@dataclass(frozen=True)
-class Group:
-    HC : int = 0 # health controls
-    DP : int = 1 # depressive patients
 
 # get the orientation of MRI
 get_orientation = lambda path : "".join(nib.aff2axcodes(nib.load(path).affine)) # input : path, output : str
 
 def get_yeo_network_of_brainnetome() -> None:
+    # functional networks
     if not Brain_Atlas_Dir_Path.network_json_path.exists():
         # subregion_func_network_Yeo_updated
         pd_frame = pd.read_csv(Brain_Atlas_Dir_Path.network_csv_path, sep=",")
@@ -349,7 +346,7 @@ def preprocess_fMRI_with_atlas(saved_dir_path : Path,  fMRI_path : Path, drop_fr
     outprefix = "outprefix_of_registration_"
     aligned_func_path = saved_dir_path / "aligned_func.nii.gz"
     if not aligned_func_path.exists():
-        moving_image = ants.image_read(str(corrected_func_path))
+        moving_image = ants.image_read(filename=str(corrected_func_path))
         # Get the first valid frame (after skipping drop_frames frames)  
         reference_frame_idx = drop_frames  
         reference_frame = moving_image[:, :, :, reference_frame_idx:reference_frame_idx+1]  
@@ -369,33 +366,48 @@ def preprocess_fMRI_with_atlas(saved_dir_path : Path,  fMRI_path : Path, drop_fr
             moving_image_t = moving_image[:, :, :, t:t+1]
             temp_path = split_4dantsImageFrame_into_3d(image_4d=moving_image_t)
             # register
-            result = ants.apply_transforms(fixed=ants.image_read(str(atlas_path)), 
-                                            moving=ants.image_read(temp_path),
+            result = ants.apply_transforms(fixed=ants.image_read(filename=str(atlas_path)), 
+                                            moving=ants.image_read(filename=temp_path),
                                             transformlist=transforms)
             results_list.append(result)
             # delete temporary file and variables
             Path(temp_path).unlink()
             del result, moving_image_t, temp_path
-        ants.image_write(ants.merge_channels(results_list), str(aligned_func_path))
+        ants.image_write(image=ants.merge_channels(image_list=results_list), filename=str(aligned_func_path))
         del moving_image, results_list
         for file in Path(".").glob(f"{outprefix}*"):
             file.unlink()
         del transforms
     # change the dim[0] from 5 to 4
-    adjust_dim_of_antsImage(aligned_func_path)
+    adjust_dim_of_antsImage(image_5d_path=aligned_func_path)
 
-    # Step 3: Functional connectivity
-    fc_matrix_path = saved_dir_path / "fc_matrix.npz"
+    # Step 3: Denoise
+    denoised_func_path = saved_dir_path / "denoised_func.nii.gz"
+    if not denoised_func_path.exists():
+        print(f"Denoising {denoised_func_path.parent.name}: func")
+        start_time = time.time()
+        fwhm = float(re.search(pattern=r"(\d+(?:\.\d+)?)mm", string=str(atlas_path.name)).group(1))
+        smoothed_img = image.smooth_img(  
+            imgs=str(aligned_func_path),   
+            fwhm=fwhm  # adjust the filtering width, mm  
+        )
+        smoothed_img.to_filename(str(denoised_func_path))  
+        end_time = time.time()
+        print(f"It took {end_time - start_time:.2f} seconds to denoise the {denoised_func_path.parent.name}.")
+        del smoothed_img
+
+    # Step 4: Functional connectivity
+    fc_matrix_path = saved_dir_path / "features.npz"
     if not fc_matrix_path.exists():
         start_time = time.time()
-        atlas = nib.load(atlas_path)
-        aligned_func = nib.load(aligned_func_path)
+        atlas = nib.load(filename=atlas_path)
+        denoised_func = nib.load(filename=denoised_func_path)
         masker = maskers.NiftiLabelsMasker(labels_img=atlas, standardize="zscore_sample")
-        time_series = masker.fit_transform(aligned_func) # shape=[len of series, num of regions]
+        time_series = masker.fit_transform(denoised_func) # shape=[len of series, num of regions]
         fc_matrix = connectome.ConnectivityMeasure(kind="correlation", standardize="zscore_sample").fit_transform([time_series])[0]
         np.fill_diagonal(fc_matrix, 0) # set the diagonal to 0 (1 -> 0)
         npz_data = {Experiment_Config.TS : time_series, Experiment_Config.FC : fc_matrix}
-        np.savez_compressed(fc_matrix_path, **npz_data)
+        np.savez_compressed(file=fc_matrix_path, **npz_data)
         plot_time_series(time_series=time_series, saved_dir_path=saved_dir_path, region_names=lut_dict)
         plot_fc_matrix(fc_matrix=fc_matrix, saved_dir_path=saved_dir_path)
         end_time = time.time()
@@ -409,6 +421,7 @@ def process_mild_depression() -> int:
     num_dp, num_hc = 0, 0
     ## ds002748
     raw_data_root_dir_path = Raw_Data_Dir_Path.ds002748_dir_path
+    assert raw_data_root_dir_path.exists(), f"{raw_data_root_dir_path} dose not exist"
     # information
     participants_tsv_path = raw_data_root_dir_path / "participants.tsv"
     assert participants_tsv_path.exists(), f"{participants_tsv_path} does not exist"
@@ -446,6 +459,7 @@ def process_mild_depression() -> int:
             
     ## ds003007
     raw_data_root_dir_path = Raw_Data_Dir_Path.ds003007_dir_path
+    assert raw_data_root_dir_path.exists(), f"{raw_data_root_dir_path} dose not exist"
     # information
     participants_tsv_path = raw_data_root_dir_path / "participants.tsv"
     assert participants_tsv_path.exists(), f"{participants_tsv_path} does not exist"
@@ -488,6 +502,7 @@ def process_heath_controls(selected_num : int) -> None:
     Cambridge_Buckner
     """
     raw_data_root_dir_path = Raw_Data_Dir_Path.cambridge_dir_path
+    assert raw_data_root_dir_path.exists(), f"{raw_data_root_dir_path} dose not exist"
     # information
     participants_info = {}
     with (raw_data_root_dir_path / "Cambridge_Buckner_demographics.txt").open("r") as f:
@@ -530,122 +545,9 @@ def process_heath_controls(selected_num : int) -> None:
             func_file_path = func_file_path[0]
             preprocess_fMRI_with_atlas(saved_dir_path=saved_dir_path, fMRI_path=func_file_path, drop_frames=5, atlas_path=Brain_Atlas_Dir_Path.atlas_1_nii_path)
 
-def process_major_depression() -> None:
-    """
-    SRPBS: MDD and part of HCs
-    """
-    raw_data_root_dir_path = Raw_Data_Dir_Path.SRPBS_dir_path
-    # rename the original rs-fMRI files, which have no suffix
-    for sub_dir_path in tqdm(list((raw_data_root_dir_path / "data").iterdir()), desc="Rename the rsfMRI", leave=True):
-        rsfmri_dir_path = sub_dir_path / "rsfmri"
-        assert rsfmri_dir_path.exists(), f"{rsfmri_dir_path} does not exist"
-        for vol_path in rsfmri_dir_path.iterdir():
-            if vol_path.suffix == "":
-                vol_path.rename(vol_path.with_suffix(".nii"))
-    # information of MDD and HCs
-    participants_tsv_path = raw_data_root_dir_path / "participants.tsv"
-    assert participants_tsv_path.exists(), f"{participants_tsv_path} does not exist"
-    protocol_info = pd.read_csv(participants_tsv_path, sep="\t")
-    protocol_info = protocol_info[["participant_id", "protocol"]]
-    rsfMRI_epi_tsv_path = raw_data_root_dir_path / "MRI_protocols_rsMRI.tsv"
-    assert rsfMRI_epi_tsv_path.exists(), f"{rsfMRI_epi_tsv_path} does not exist"
-    rsfMRI_epi_info = pd.read_csv(rsfMRI_epi_tsv_path, sep="\t", header=1)
-    participants_info = {}
-    for sup_num in range(1, 10): # not 7
-        if sup_num == 7:
-            continue
-        sup_tsv_path = raw_data_root_dir_path / f"sup{sup_num}.tsv"
-        assert sup_tsv_path.exists(), f"{sup_tsv_path} does not exist"
-        sup_info = pd.read_csv(sup_tsv_path, sep="\t")
-        sup_info = sup_info[["participant_id", "diag", "age", "sex", "hand"]]
-        if not (sup_info["diag"] == 2).sum() == 0:
-            sup_info = sup_info[sup_info["diag"].isin([0, 2])] # 0 is Healthy Control, 2 is Major depressive disorder
-            sup_info = sup_info.set_index("participant_id")
-            sup_info = sup_info.to_dict(orient="index")
-            for sub_id, info_dict in sup_info.items():
-                assert not sub_id in participants_info, f"{sub_id} already exists in participants_info"
-                info_dict["diag"] = Group.DP if info_dict["diag"] == 2 else Group.HC if info_dict["diag"] == 0 else None
-                info_dict["sex"] = Gender.Male if info_dict["sex"] == 1 else Gender.Female if info_dict["sex"] == 2 else None
-                info_dict["hand"] = Hand.R if info_dict["hand"] == 1 else Hand.L if info_dict["hand"] == 2 else info_dict["hand"] # some 0
-                assert info_dict["diag"] is not None, f"{sub_id} diag is None"
-                assert info_dict["sex"] is not None, f"{sub_id} sex is None"
-                assert info_dict["hand"] is not None, f"{sub_id} hand is None"
-                # naming standardisation
-                info_dict[Experiment_Config.A] = info_dict.pop("age")
-                info_dict[Experiment_Config.G] = info_dict.pop("sex")
-                info_dict[Experiment_Config.H] = info_dict.pop("hand")
-                info_dict[Experiment_Config.T] = info_dict.pop("diag")
-                participants_info[sub_id] = info_dict
-    # now in participants_info, number of health controls > number of depressive patients
-    pos_list = [sub_id for sub_id in participants_info if participants_info[sub_id][Experiment_Config.T] == Group.DP]
-    neg_list = [sub_id for sub_id in participants_info if participants_info[sub_id][Experiment_Config.T] == Group.HC]
-    # filter the orientation: pos 255-16=239; neg 365-0=365
-    atlas_path = Brain_Atlas_Dir_Path.atlas_3_nii_path
-    atlas_orientation = get_orientation(path=atlas_path)
-    for filter_list in [pos_list, neg_list]:
-        del_idx_list = []
-        for idx, sub_id in tqdm(enumerate(filter_list), total=len(filter_list), desc=f"Filtering", leave=True):
-            func_dir = raw_data_root_dir_path / "data" / sub_id / "rsfmri"
-            assert func_dir.exists(), f"{func_dir} does not exist"
-            for vol_path in func_dir.iterdir():
-                if not get_orientation(path=vol_path) == atlas_orientation:
-                    del_idx_list.append(idx)
-                    break
-        for del_idx in sorted(del_idx_list, reverse=True):
-            del filter_list[del_idx]
-
-    assert len(neg_list) > len(pos_list) # 365 vs 239
-    neg_list = random.sample(neg_list, len(pos_list))
-
-    for cnt, sub_id in enumerate(pos_list + neg_list):
-        print(f"Subjects: {cnt+1} / {len(pos_list + neg_list)}.")
-        # saved dir path
-        saved_dir_path = Running_File_Dir_Path.root_dir / raw_data_root_dir_path.name / sub_id
-        saved_dir_path.mkdir(parents=True, exist_ok=True)
-        # information
-        write_json(json_path=saved_dir_path / "information.json", dict_data=participants_info[sub_id])
-        # find the information of rs-fMRI equipment, which is corresponding to the subject
-        protocol = protocol_info.loc[protocol_info["participant_id"] == sub_id, "protocol"].iloc[0]
-        order = rsfMRI_epi_info.loc[rsfMRI_epi_info["Protocol #"] == "Slice acquisition order", str(protocol)].iloc[0]
-        interleaved = True if "leave" in order else False 
-        # merge the 3D volume into 4D fMRI
-        func_dir = raw_data_root_dir_path / "data" / sub_id / "rsfmri"
-        assert func_dir.exists(), f"{func_dir} does not exist"
-        if interleaved:
-            sorted_list = sorted(list(func_dir.iterdir()))
-            inter_1 = sorted_list[::2]
-            inter_2 = sorted_list[1::2]
-            func_path_list = inter_1 + inter_2
-        else:
-            func_path_list = sorted(list(func_dir.iterdir()))
-        func_path_list = func_path_list[5:] # drop the first 5 frames
-        first_img = nib.load(func_path_list[0])
-        first_data = first_img.get_fdata()
-        first_shape = first_data.shape
-        affine = first_img.affine
-        header = first_img.header.copy()
-        merged_data = np.zeros(first_shape + (len(func_path_list),), dtype=first_data.dtype)
-        merged_path = saved_dir_path / "merged_func.nii.gz"
-        if not merged_path.exists():
-            for i, func_path in tqdm(enumerate(func_path_list), total=len(func_path_list), desc=f"Merge {sub_id}", leave=True):
-                img = nib.load(func_path)
-                data = img.get_fdata()
-                merged_data[..., i] = data
-                assert data.shape == first_shape, f"Shape mismatch at {func_path}: {data.shape} vs {first_shape}"
-                assert np.allclose(img.affine, affine), f"Affine mismatch at {func_path}"
-            header["dim"][0] = 4
-            header["dim"][4] = len(func_path_list)
-            merged_img = nib.Nifti1Image(merged_data, affine, header)
-            nib.save(merged_img, merged_path)
-        # fMRI -> time series + functional connectivity
-        preprocess_fMRI_with_atlas(saved_dir_path=saved_dir_path, fMRI_path=merged_path, drop_frames=0, atlas_path=atlas_path)
-
 def split_folds() -> None:
     """
     Mild: ds002748, ds003007, Cambridge_Buckner
-    Major: SRPBS_OPEN
-    Adolescent: 
-
     Writed Json: {fold : {group : {task : list[str of path]}}}
     """
     def __split_list__(item_list : list[Path], n_splits : range = n_splits) -> dict[int, dict[str, list[str]]]:
@@ -682,7 +584,6 @@ def split_folds() -> None:
 
     for (depr_type, name_tuple) in [
         (Experiment_Config.MILD , Mild_Config().dataset_name) , # mild
-        (Experiment_Config.MAJOR, Major_Config().dataset_name), # major
     ]:
         saved_json_path = Running_File_Dir_Path.split_dir_path / "".join([depr_type, ".json"])
         if not saved_json_path.exists():
@@ -697,8 +598,6 @@ def main():
     selected_num = process_mild_depression()
     # Health Controls
     process_heath_controls(selected_num=selected_num)
-    # Major Depressive Disorder
-    process_major_depression()
     # Split folds
     split_folds()
 
