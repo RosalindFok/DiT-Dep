@@ -100,11 +100,8 @@ class Depression_Dataset(Dataset):
         # data derived from rs-fMRI
         with np.load(file=data_npz_path, allow_pickle=True) as data_npz:
             time_series = data_npz[Experiment_Config.TS]
-            # crop
-            start = time_series.shape[0] - self.priori[Experiment_Config.TS]["min"]
-            if start > 0:
-                end = start + self.priori[Experiment_Config.TS]["min"]
-                time_series = time_series[start:end]
+            # crop the number of slices
+            time_series = time_series[time_series.shape[0]-self.priori[Experiment_Config.TS]["min"]:]
             # transpose
             time_series = time_series.T # (num_slices, num_regions) -> (num_regions, num_slices)
             time_series = normalize_array(array=time_series, interval=(-1, 1))

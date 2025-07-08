@@ -557,8 +557,8 @@ def split_folds() -> None:
         fold = n_splits.start
         for train_index, test_index in kf.split(item_list):
             split_dict[fold] = {
-                Experiment_Config.TRAIN : [str(item_list[i]) if isinstance(item_list[i], Path) else item_list[i] for i in train_index],
-                Experiment_Config.TEST  : [str(item_list[i]) if isinstance(item_list[i], Path) else item_list[i] for i in test_index ]
+                Experiment_Config.TRAIN : [item_list[i].as_posix() if isinstance(item_list[i], Path) else item_list[i] for i in train_index],
+                Experiment_Config.TEST  : [item_list[i].as_posix() if isinstance(item_list[i], Path) else item_list[i] for i in test_index ]
             }
             fold += 1
         return split_dict
