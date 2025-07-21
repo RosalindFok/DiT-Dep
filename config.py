@@ -43,6 +43,7 @@ class Experiment_Config:
     woAtt : str = "without_AttRefine"
     woTS  : str = "without_TS"
     woFC  : str = "without_FC"
+    woMSE : str = "without_MSELoss"
     # Methods for Explainable AI (XAI)
     PN : str = "perturb node"
     PE : str = "perturb edge"

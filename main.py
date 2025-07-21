@@ -104,9 +104,8 @@ def test(
             "F1S" : Metric.F1S(pred_list=pred_list, true_list=true_list),
         }  
     else:
-        metrics = { # explainable AI
-            "POS_ACC" : Metric.POS_ACC(pred_list=pred_list, true_list=true_list),
-            "NEG_ACC" : Metric.NEG_ACC(pred_list=pred_list, true_list=true_list),
+        metrics = {
+            "FPR" : Metric.FPR(pred_list=pred_list, true_list=true_list)
         }
     logging.info(msg=f"Test Metrics:\n{json.dumps(metrics, indent=4, ensure_ascii=False)}")
 
@@ -125,7 +124,7 @@ def main() -> None:
         # XAI
         Experiment_Config.PN, Experiment_Config.PE,
         # Ablation
-        Experiment_Config.woDiT, Experiment_Config.woAtt, Experiment_Config.woTS, Experiment_Config.woFC
+        Experiment_Config.woDiT, Experiment_Config.woAtt, Experiment_Config.woTS, Experiment_Config.woFC, Experiment_Config.woMSE
     ])
     args = parser.parse_args()
     disorder_type = args.disorder
@@ -153,6 +152,7 @@ def main() -> None:
     # Ablation on important modules
     use_dit = (method != Experiment_Config.woDiT)
     use_att = (method != Experiment_Config.woAtt)
+    use_mse = (method != Experiment_Config.woMSE)
 
     # Identification of neuroimaging biomarkers
     xai_method_list = [Experiment_Config.PN, Experiment_Config.PE]
@@ -203,7 +203,7 @@ def main() -> None:
                 logging.info(msg=f"The number of trainable parameters is {trainable_parameters}.")
                 
                 # loss
-                loss_fn = Combined_Loss(cet_weight=1.0, mse_weight=0.4, use_dit=use_dit)
+                loss_fn = Combined_Loss(cet_weight=1.0, mse_weight=0.4, use_aux=(use_dit and use_mse))
 
                 # optimizer
                 optimizer = torch.optim.AdamW(params=model.parameters(), lr=config.lr)

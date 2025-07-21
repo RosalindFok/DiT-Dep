@@ -15,7 +15,7 @@ if platform.system() == "Windows":
         # Optimal
         Experiment_Config.O,
         # Ablation
-        Experiment_Config.woDiT, Experiment_Config.woAtt, Experiment_Config.woTS, Experiment_Config.woFC,
+        Experiment_Config.woDiT, Experiment_Config.woAtt, Experiment_Config.woMSE, Experiment_Config.woTS, Experiment_Config.woFC,
         # XAI
         Experiment_Config.PN, Experiment_Config.PE
     ]:

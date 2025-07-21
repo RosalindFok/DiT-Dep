@@ -1,7 +1,5 @@
 import numpy as np
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score
-
-from config import Group
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score, confusion_matrix
 
 class Metric:
     @staticmethod
@@ -40,17 +38,10 @@ class Metric:
         return float(f1_score(y_true=true, y_pred=pred))
     
     @staticmethod
-    def POS_ACC(pred_list : list[int], true_list : list[int]) -> float:
+    def FPR(pred_list : list[int], true_list : list[int]) -> dict[str, float]:
         pred = np.array(object=pred_list).astype(dtype=int)
         true = np.array(object=true_list).astype(dtype=int)
         assert pred.shape == true.shape, f"Invalid shape: pred={pred.shape}, true={true.shape}"
-        mask = (true == Group.DP)
-        return float(accuracy_score(y_true=true[mask], y_pred=pred[mask]))
-
-    @staticmethod
-    def NEG_ACC(pred_list : list[int], true_list : list[int]) -> float:
-        pred = np.array(object=pred_list).astype(dtype=int)
-        true = np.array(object=true_list).astype(dtype=int)
-        assert pred.shape == true.shape, f"Invalid shape: pred={pred.shape}, true={true.shape}"
-        mask = (true == Group.HC)
-        return float(accuracy_score(y_true=true[mask], y_pred=pred[mask]))
+        tn, fp, fn, tp = confusion_matrix(y_true=true, y_pred=pred).ravel()
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        return fpr

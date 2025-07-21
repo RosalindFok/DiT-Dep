@@ -55,7 +55,7 @@ class Denoising_Network(nn.Module):
         if self.use_att:
             # entropy-based attention refining
             entropy = -torch.sum(attention_weights * torch.log(attention_weights + 1e-7), dim=-1) # (B, N)
-            attention_scaling = torch.sigmoid(entropy.unsqueeze(-1) - 0.5) * 0.5 + 0.75
+            attention_scaling = torch.sigmoid(entropy.unsqueeze(-1) - 0.5) * 0.5 + 0.75 # (B, N, 1)
             attention_weights = attention_weights * attention_scaling # (B, N, N)
             attention_weights = torch.softmax(attention_weights, dim=-1) # (B, N, N)
             assert x.dim() == 3 and attention_weights.dim() == 3, f"torch.bmm input must be 3D tensor, got {x.dim()}D and {attention_weights.dim()}D"
@@ -302,17 +302,17 @@ class DIT_DEP(nn.Module):
         return Model_Returns(logits=logits, x_proj=tensor, x_pred=x_p)
 
 class Combined_Loss(nn.modules.loss._Loss):
-    def __init__(self, cet_weight : float, mse_weight : float, use_dit : bool) -> None:
+    def __init__(self, cet_weight : float, mse_weight : float, use_aux : bool) -> None:
         super().__init__()
         self.cet_weight = cet_weight
         self.mse_weight = mse_weight
-        self.use_dit = use_dit
+        self.use_aux = use_aux
         self.cet = nn.CrossEntropyLoss()
         self.mse = nn.MSELoss()
 
     def forward(self, input : torch.Tensor, target : torch.Tensor, x_0 : torch.Tensor, x_p : torch.Tensor) -> None:
         cet_loss = self.cet(input=input, target=target)
-        if self.use_dit:
+        if self.use_aux:
             assert x_0 is not None and x_p is not None
             mse_loss = self.mse(x_0.flatten(start_dim=1), x_p.flatten(start_dim=1))
         else:

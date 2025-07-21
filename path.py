@@ -8,10 +8,6 @@ class Raw_Data_Dir_Path:
     # mild
     ds002748_dir_path = dataset_dir_path / "ds002748"
     ds003007_dir_path = dataset_dir_path / "ds003007"
-    # major
-    SRPBS_dir_path    = dataset_dir_path / "SRPBS_OPEN"
-    # adolescent
-    ds004627_dir_path = dataset_dir_path / "ds004627"
     # health controls
     cambridge_dir_path = dataset_dir_path / "Cambridge_Buckner"
     
