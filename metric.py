@@ -38,7 +38,7 @@ class Metric:
         return float(f1_score(y_true=true, y_pred=pred))
     
     @staticmethod
-    def FPR(pred_list : list[int], true_list : list[int]) -> dict[str, float]:
+    def FPR(pred_list : list[int], true_list : list[int]) -> float:
         pred = np.array(object=pred_list).astype(dtype=int)
         true = np.array(object=true_list).astype(dtype=int)
         assert pred.shape == true.shape, f"Invalid shape: pred={pred.shape}, true={true.shape}"

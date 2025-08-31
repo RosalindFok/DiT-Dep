@@ -11,7 +11,7 @@ DiT-Dep: A Diffusion Transformer-based Framework for Depression Detection and Ne
 Brainnetome Atlas (has been downloaded): [url](https://atlas.brainnetome.org/download.html)
 
 ## Preprocess
-Platform: Windows 11 <br>
+Platform: `Windows 11` & `NVIDIA GeForce RTX 3060 Laptop GPU 6.0 GB` <br>
 Environment: 
 ``` shell
 Python 3.11.4
@@ -24,11 +24,14 @@ Run:
 python preprocess.py
 ```
 
-## DiT for Depression
-Platform: `NVIDIA GeForce RTX 3060 Laptop GPU 6.0 GB` <br>
-Numpy Version: `2.0.1` <br>
-PyTorch Version: `2.6.0+cu124` <br>
-Scikit-learn Version: `1.6.1` <br>
+## Model of DiT-Dep
+Platform: `Windows 11` & `NVIDIA GeForce RTX 3060 Laptop GPU 6.0 GB` <br>
+Environment: 
+``` shell
+Numpy Version: 2.0.1
+PyTorch Version: 2.6.0+cu124
+Scikit-learn Version: 1.6.1 
+```
 Run: 
 ``` shell
 python run.py # check the results in "logs"
@@ -44,7 +47,7 @@ python run.py # check the results in "logs"
 |BrainGNN|0.84375|0.8023391812865498|0.9125|0.853781512605042|0.925|10.1016/j.media.2021.102233|https://github.com/xxlya/BrainGNN_Pytorch|
 |N2V-GAT|0.825|0.80518106162843|0.8625|0.8281363694903249|0.884375|10.1007/s12021-025-09731-8|None|
 
-## Results
+## Raw Results
 !!!If the paper is accepted, all original experimental data in the 'logs' folder will be made public!!!<br>
 Click the name to check the raw experimental data: <br>
 [DiT-Dep](./logs/mild/Whole_brain/optimal/metric.json) <br>
