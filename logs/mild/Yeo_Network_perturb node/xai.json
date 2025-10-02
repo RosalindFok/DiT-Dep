@@ -1,0 +1,12 @@
+{
+    "FPR": {
+        "Visual": 0.1875,
+        "Limbic": 0.2,
+        "Ventral": 0.25,
+        "Control": 0.25,
+        "Somato": 0.275,
+        "Dorsal": 0.275,
+        "Salience": 0.2875,
+        "Default": 0.3125
+    }
+}

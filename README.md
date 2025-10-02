@@ -48,7 +48,6 @@ python run.py # check the results in "logs"
 |N2V-GAT|0.825|0.80518106162843|0.8625|0.8281363694903249|0.884375|10.1007/s12021-025-09731-8|None|
 
 ## Raw Results
-!!!If the paper is accepted, all original experimental data in the 'logs' folder will be made public!!!<br>
 Click the name to check the raw experimental data: <br>
 [DiT-Dep](./logs/mild/Whole_brain/optimal/metric.json) <br>
 [wo E](./logs/mild/Whole_brain/without_FC/metric.json) <br>
