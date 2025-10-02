@@ -1,5 +1,6 @@
 # DiT-Dep
-DiT-Dep: A Diffusion Transformer-based Framework for Depression Detection and Neuroimaging Biomarkers Identification
+Title: DiT-Dep: A Diffusion Transformer-based Framework for Depression Detection and Neuroimaging Biomarkers Identification <br>
+Accepted Conference: Health Information Science, 2025 <br>
 
 ## Datasets and Atlas
 | Name | DPs | HCs | doi |
